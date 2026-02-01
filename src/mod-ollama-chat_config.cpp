@@ -58,6 +58,7 @@ bool        g_DisableRepliesInCombat          = true;
 bool        g_EnableRandomChatter             = true;
 bool        g_EnableEventChatter              = true;
 bool        g_EnableRPPersonalities           = false;
+bool        g_EnableWhisperReplies            = false;
 bool        g_DebugEnabled                    = false;
 bool        g_DebugShowFullPrompt             = false;
 
@@ -258,6 +259,13 @@ uint32_t g_EventCooldownTime = 10;
 // --------------------------------------------
 bool g_RestrictBotsToPartyMembers = false;
 
+// --------------------------------------------
+// Typing Simulation Settings
+// --------------------------------------------
+bool g_EnableTypingSimulation = false;
+uint32_t g_TypingSimulationBaseDelay = 1000;     // 1000ms base delay
+uint32_t g_TypingSimulationDelayPerChar = 250;   // 250ms per character (4 chars/sec)
+
 
 static std::vector<std::string> SplitString(const std::string& str, char delim)
 {
@@ -373,6 +381,7 @@ void LoadOllamaChatConfig()
     g_DisableRepliesInCombat          = sConfigMgr->GetOption<bool>("OllamaChat.DisableRepliesInCombat", true);
     g_EnableRandomChatter             = sConfigMgr->GetOption<bool>("OllamaChat.EnableRandomChatter", true);
     g_EnableEventChatter              = sConfigMgr->GetOption<bool>("OllamaChat.EnableEventChatter", true);
+    g_EnableWhisperReplies            = sConfigMgr->GetOption<bool>("OllamaChat.EnableWhisperReplies", false);
 
     g_DebugEnabled                    = sConfigMgr->GetOption<bool>("OllamaChat.DebugEnabled", false);
     g_DebugShowFullPrompt             = sConfigMgr->GetOption<bool>("OllamaChat.DebugShowFullPrompt", false);
@@ -431,6 +440,11 @@ void LoadOllamaChatConfig()
     g_RAGPromptTemplate               = sConfigMgr->GetOption<std::string>("OllamaChat.RAGPromptTemplate", "RELEVANT INFORMATION:\n{rag_info}\nUse this information to provide accurate and detailed responses when applicable.");
 
     g_ThinkModeEnableForModule        = sConfigMgr->GetOption<bool>("OllamaChat.ThinkModeEnableForModule", false);
+
+    // Typing Simulation
+    g_EnableTypingSimulation          = sConfigMgr->GetOption<bool>("OllamaChat.EnableTypingSimulation", false);
+    g_TypingSimulationBaseDelay       = sConfigMgr->GetOption<uint32_t>("OllamaChat.TypingSimulationBaseDelay", 1000);
+    g_TypingSimulationDelayPerChar    = sConfigMgr->GetOption<uint32_t>("OllamaChat.TypingSimulationDelayPerChar", 250);
 
     g_EventTypeDefeated           = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeDefeated", "");
     g_EventTypeDefeatedPlayer     = sConfigMgr->GetOption<std::string>("OllamaChat.EventTypeDefeatedPlayer", "");

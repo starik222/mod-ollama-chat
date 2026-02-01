@@ -58,6 +58,7 @@ extern bool        g_DisableRepliesInCombat;
 extern bool        g_EnableRandomChatter;
 extern bool        g_EnableEventChatter;
 extern bool        g_EnableRPPersonalities;
+extern bool        g_EnableWhisperReplies;
 extern bool        g_DebugEnabled;
 extern bool        g_DebugShowFullPrompt;
 
@@ -256,6 +257,13 @@ extern uint32_t g_EventCooldownTime;
 // Party Restriction Settings
 // --------------------------------------------
 extern bool g_RestrictBotsToPartyMembers;
+
+// --------------------------------------------
+// Typing Simulation Settings
+// --------------------------------------------
+extern bool g_EnableTypingSimulation;
+extern uint32_t g_TypingSimulationBaseDelay;      // Base delay in milliseconds
+extern uint32_t g_TypingSimulationDelayPerChar;   // Delay per character in milliseconds
 
 // --------------------------------------------
 // Loader Functions

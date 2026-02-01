@@ -54,7 +54,7 @@ static bool IsBotAllowedForRestrictedMode(Player* bot, Player* source)
     for (GroupReference* ref = botGroup->GetFirstMember(); ref; ref = ref->next())
     {
         Player* member = ref->GetSource();
-        if (member && !sPlayerbotsMgr->GetPlayerbotAI(member))
+        if (member && !PlayerbotsMgr::instance().GetPlayerbotAI(member))
         {
             hasRealPlayer = true;
             break;
@@ -74,7 +74,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
        return;
     }
 
-    bool isSourceBot = sPlayerbotsMgr->GetPlayerbotAI(source) != nullptr;
+    bool isSourceBot = PlayerbotsMgr::instance().GetPlayerbotAI(source) != nullptr;
     bool hasNearbyRealPlayer = false;
     bool isGuildEvent = false;
 
@@ -99,7 +99,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
                 Player* player = pair.second;
                 if (!player || !player->IsInWorld())
                     continue;
-                if (sPlayerbotsMgr->GetPlayerbotAI(player))
+                if (PlayerbotsMgr::instance().GetPlayerbotAI(player))
                     continue;
                 if (player->GetGuild() && player->GetGuild()->GetId() == guild->GetId()) {
                     isGuildEvent = true;
@@ -116,7 +116,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
         if (player == source)
             continue;
 
-        if (!sPlayerbotsMgr->GetPlayerbotAI(player) && player->IsWithinDist(source, g_EventChatterRealPlayerDistance, false))
+        if (!PlayerbotsMgr::instance().GetPlayerbotAI(player) && player->IsWithinDist(source, g_EventChatterRealPlayerDistance, false))
         {
             hasNearbyRealPlayer = true;
             break;
@@ -150,7 +150,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
             if (!player || !player->IsInWorld())
                 continue;
                 
-            PlayerbotAI* ai = sPlayerbotsMgr->GetPlayerbotAI(player);
+            PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(player);
             if (!ai)
                 continue;
                 
@@ -165,7 +165,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
                 if (!guildPlayer || !guildPlayer->IsInWorld())
                     continue;
                     
-                if (sPlayerbotsMgr->GetPlayerbotAI(guildPlayer))
+                if (PlayerbotsMgr::instance().GetPlayerbotAI(guildPlayer))
                     continue;
                     
                 if (guildPlayer->GetGuild() && guildPlayer->GetGuild()->GetId() == guild->GetId())
@@ -198,8 +198,8 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
     for (auto it = candidateBots.begin(); it != candidateBots.end(); ) {
         Player* bot = *it;
         
-        // Apply party restriction only for real player events
-        if (!isSourceBot && !IsBotAllowedForRestrictedMode(bot, source)) {
+        // Apply party restriction for all events
+        if (!IsBotAllowedForRestrictedMode(bot, source)) {
             it = candidateBots.erase(it);
             continue;
         }
@@ -279,7 +279,7 @@ void OllamaBotEventChatter::DispatchGameEvent(Player* source, std::string type, 
 
     for (Player* bot : candidateBots)
     {
-        PlayerbotAI* ai = sPlayerbotsMgr->GetPlayerbotAI(bot);
+        PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
         if (!ai) {
             if (g_DebugEnabled)
                 LOG_INFO("server.loading", "[OllamaChat] Skipping {} - not a bot", bot->GetName());
@@ -346,13 +346,34 @@ void OllamaBotEventChatter::QueueEvent(Player* bot, std::string type, std::strin
             if (prompt.empty()) return;
 
             std::string response = QueryOllamaAPI(prompt);
-            if (response.empty()) return;
+            if (response.empty())
+            {
+                if (g_DebugEnabled)
+                    LOG_INFO("server.loading", "[OllamaChat] Bot {} skipped event response due to API error", botPtr->GetName());
+                return;
+            }
 
             // reacquire pointers before use
             botPtr = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
             if (!botPtr) return;
-            PlayerbotAI* botAI = sPlayerbotsMgr->GetPlayerbotAI(botPtr);
+            PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(botPtr);
             if (!botAI) return;
+
+            // Simulate typing delay if enabled
+            if (g_EnableTypingSimulation)
+            {
+                uint32_t delay = g_TypingSimulationBaseDelay + (response.length() * g_TypingSimulationDelayPerChar);
+                if (g_DebugEnabled)
+                    LOG_INFO("server.loading", "[OllamaChat] Bot {} simulating typing delay: {}ms for {} characters", 
+                             botPtr->GetName(), delay, response.length());
+                std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+                
+                // Reacquire pointers after delay
+                botPtr = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
+                if (!botPtr) return;
+                botAI = PlayerbotsMgr::instance().GetPlayerbotAI(botPtr);
+                if (!botAI) return;
+            }
 
             if (isGuildEvent && botPtr->GetGuild())
                 botAI->SayToGuild(response);
@@ -373,7 +394,7 @@ std::string OllamaBotEventChatter::BuildPrompt(Player* bot, std::string promptTe
 {
     if (!bot) return "";
 
-    PlayerbotAI* ai = sPlayerbotsMgr->GetPlayerbotAI(bot);
+    PlayerbotAI* ai = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
     if (!ai) return "";
 
     std::string personality = GetBotPersonality(bot);
@@ -600,7 +621,7 @@ void ChatOnAchievement::OnPlayerCompleteAchievement(Player* player, AchievementE
     // Guild-specific achievement event for real players only
     if (player->GetGuild() && g_EnableGuildEventChatter && !g_GuildEventTypeGuildAchievement.empty())
     {
-        if (!sPlayerbotsMgr->GetPlayerbotAI(player)) // Only real players
+        if (!PlayerbotsMgr::instance().GetPlayerbotAI(player)) // Only real players
             eventChatter.DispatchGameEvent(player, g_GuildEventTypeGuildAchievement, achievement->name[0]);
     }
 }
@@ -660,7 +681,7 @@ void ChatOnGuildMemberChange::OnGuildMemberLogin(Player* player, Guild* guild)
 {
     if (!player || !guild || !g_EnableGuildEventChatter)
         return;
-    if (sPlayerbotsMgr->GetPlayerbotAI(player))
+    if (PlayerbotsMgr::instance().GetPlayerbotAI(player))
         return; // Only real players
     if (!g_GuildEventTypeGuildLogin.empty())
         eventChatter.DispatchGameEvent(player, g_GuildEventTypeGuildLogin, guild->GetName());

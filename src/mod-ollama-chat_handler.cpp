@@ -161,100 +161,82 @@ Channel* GetValidChannel(uint32_t teamId, const std::string& channelName, Player
     return channel;
 }
 
-void PlayerBotChatHandler::OnPlayerChat(Player* player, uint32_t type, uint32_t lang, std::string& msg)
+bool PlayerBotChatHandler::OnPlayerCanUseChat(Player* player, uint32_t type, uint32_t lang, std::string& msg)
 {
     if (!g_Enable)
-        return;
+        return true;
 
     ChatChannelSourceLocal sourceLocal = GetChannelSourceLocal(type);
     ProcessChat(player, type, lang, msg, sourceLocal, nullptr, nullptr);
+    return true;
 }
 
-void PlayerBotChatHandler::OnPlayerChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Group* /*group*/)
+bool PlayerBotChatHandler::OnPlayerCanUseChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Group* /*group*/)
 {
     if (!g_Enable)
-        return;
+        return true;
 
     ChatChannelSourceLocal sourceLocal = GetChannelSourceLocal(type);
     ProcessChat(player, type, lang, msg, sourceLocal, nullptr, nullptr);
+    return true;
 }
 
-void PlayerBotChatHandler::OnPlayerChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Guild* /*guild*/)
+bool PlayerBotChatHandler::OnPlayerCanUseChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Guild* /*guild*/)
 {
     if (!g_Enable)
-        return;
+        return true;
 
     ChatChannelSourceLocal sourceLocal = GetChannelSourceLocal(type);
     ProcessChat(player, type, lang, msg, sourceLocal, nullptr, nullptr);
+    return true;
 }
 
-void PlayerBotChatHandler::OnPlayerChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Channel* channel)
+bool PlayerBotChatHandler::OnPlayerCanUseChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Channel* channel)
 {
     if (!g_Enable)
-        return;
+        return true;
 
     ChatChannelSourceLocal sourceLocal = GetChannelSourceLocal(type);
     ProcessChat(player, type, lang, msg, sourceLocal, channel, nullptr);
+    return true;
 }
 
 bool PlayerBotChatHandler::OnPlayerCanUseChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Player* receiver)
 {
-    // Only handle whispers for our module
-    if (type != CHAT_MSG_WHISPER)
-        return true;
-    
     // Only process if our module is enabled
     if (!g_Enable)
         return true;
-    
-    // Check if this is a valid whisper to a bot
-    if (!receiver || !player || player == receiver)
-        return true;
-    
-    // Check if sender is a bot - if so, don't trigger Ollama responses for bot-to-bot whispers
-    PlayerbotAI* senderAI = sPlayerbotsMgr->GetPlayerbotAI(player);
-    if (senderAI && senderAI->IsBotAI())
+
+    if (type == CHAT_MSG_WHISPER)
     {
-        return true;
+        // Check if this is a valid whisper to a bot
+        if (!receiver || !player || player == receiver)
+            return true;
+
+        // Check if sender is a bot - if so, don't trigger Ollama responses for bot-to-bot whispers
+        PlayerbotAI* senderAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
+        if (senderAI && senderAI->IsBotAI())
+        {
+            return true;
+        }
+
+        PlayerbotAI* receiverAI = PlayerbotsMgr::instance().GetPlayerbotAI(receiver);
+        if (!receiverAI || !receiverAI->IsBotAI())
+            return true;
     }
-    
-    PlayerbotAI* receiverAI = sPlayerbotsMgr->GetPlayerbotAI(receiver);
-    if (!receiverAI || !receiverAI->IsBotAI())
-        return true;
-    
+
     if (g_DebugEnabled)
     {
-        LOG_INFO("server.loading", "[Ollama Chat] OnPlayerCanUseChat called: player={}, type={}, receiver={}", 
-                player->GetName(), type, receiver ? receiver->GetName() : "null");
+        LOG_INFO("server.loading", "[Ollama Chat] OnPlayerCanUseChat called: player={}, type={}, receiver={}",
+            player->GetName(), type, receiver ? receiver->GetName() : "null");
     }
-    
+
     // Process the chat immediately in OnPlayerCanUseChat to prevent double processing
     ChatChannelSourceLocal sourceLocal = GetChannelSourceLocal(type);
     ProcessChat(player, type, lang, msg, sourceLocal, nullptr, receiver);
-    
+
     // Return false to prevent the message from being processed again in OnPlayerChat
     return true;
-}
-
-void PlayerBotChatHandler::OnPlayerChat(Player* player, uint32_t type, uint32_t lang, std::string& msg, Player* receiver)
-{
-    // This method should now only handle non-whisper messages or cases where OnPlayerCanUseChat returned true
-    if (!g_Enable)
-        return;
-
-    // Skip whispers since they're handled in OnPlayerCanUseChat
-    if (type == CHAT_MSG_WHISPER)
-        return;
-
-    if(g_DebugEnabled)
-    {
-        LOG_INFO("server.loading", "[Ollama Chat] OnPlayerChat with receiver called: player={}, type={}, receiver={}", 
-                player->GetName(), type, receiver ? receiver->GetName() : "null");
-    }
-
-    // Handle other chat types (non-whisper)
-    ChatChannelSourceLocal sourceLocal = GetChannelSourceLocal(type);
-    ProcessChat(player, type, lang, msg, sourceLocal, nullptr, receiver);
 }
 
 void AppendBotConversation(uint64_t botGuid, uint64_t playerGuid, const std::string& playerMessage, const std::string& botReply)
@@ -712,7 +694,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         }
     }
              
-    PlayerbotAI* senderAI = sPlayerbotsMgr->GetPlayerbotAI(player);
+    PlayerbotAI* senderAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
     bool senderIsBot = (senderAI && senderAI->IsBotAI());
     
     std::vector<Player*> eligibleBots;
@@ -720,6 +702,16 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
     // Handle different chat sources differently
     if (sourceLocal == SRC_WHISPER_LOCAL && receiver != nullptr)
     {
+        // Check if whisper replies are disabled
+        if (!g_EnableWhisperReplies)
+        {
+            if(g_DebugEnabled)
+            {
+                LOG_INFO("server.loading", "[Ollama Chat] Whisper replies are disabled, skipping");
+            }
+            return;
+        }
+        
         if(g_DebugEnabled)
         {
             LOG_INFO("server.loading", "[Ollama Chat] Processing whisper from {} to {}", 
@@ -733,7 +725,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         }
         
         // For whispers, only the receiver bot can respond (if it's a bot)
-        PlayerbotAI* receiverAI = sPlayerbotsMgr->GetPlayerbotAI(receiver);
+        PlayerbotAI* receiverAI = PlayerbotsMgr::instance().GetPlayerbotAI(receiver);
         if (receiverAI && receiverAI->IsBotAI())
         {
             eligibleBots.push_back(receiver);
@@ -775,7 +767,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                 continue;
                 
             // Skip non-bots early
-            PlayerbotAI* candidateAI = sPlayerbotsMgr->GetPlayerbotAI(candidate);
+            PlayerbotAI* candidateAI = PlayerbotsMgr::instance().GetPlayerbotAI(candidate);
             if (!candidateAI || !candidateAI->IsBotAI())
                 continue;
                 
@@ -841,7 +833,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             Player* candidate = itr.second;
             if (candidate->IsInWorld() && candidate != player)
             {
-                PlayerbotAI* candidateAI = sPlayerbotsMgr->GetPlayerbotAI(candidate);
+                PlayerbotAI* candidateAI = PlayerbotsMgr::instance().GetPlayerbotAI(candidate);
                 if (candidateAI && candidateAI->IsBotAI())
                 {
                     eligibleBots.push_back(candidate);
@@ -858,8 +850,8 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             continue;
         }
         
-        // Apply party restriction only for real player messages
-        if (!senderIsBot && g_RestrictBotsToPartyMembers)
+        // Apply party restriction for all messages
+        if (g_RestrictBotsToPartyMembers)
         {
             Group* botGroup = bot->GetGroup();
             Group* playerGroup = player->GetGroup();
@@ -887,7 +879,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             for (GroupReference* ref = botGroup->GetFirstMember(); ref; ref = ref->next())
             {
                 Player* member = ref->GetSource();
-                if (member && !sPlayerbotsMgr->GetPlayerbotAI(member))
+                if (member && !PlayerbotsMgr::instance().GetPlayerbotAI(member))
                 {
                     hasRealPlayer = true;
                     break;
@@ -933,7 +925,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                 continue;
             if (!candidate->IsInWorld())
                 continue;
-            if (!sPlayerbotsMgr->GetPlayerbotAI(candidate))
+            if (!PlayerbotsMgr::instance().GetPlayerbotAI(candidate))
             {
                 realPlayerNearby = true;
                 break;
@@ -1079,11 +1071,11 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                 {
                     if(g_DebugEnabled)
                     {
-                        LOG_ERROR("server.loading", "[Ollama Chat] Bot {} received empty response from Ollama API.", botPtr->GetName());
+                        LOG_INFO("server.loading", "[OllamaChat] Bot {} skipped reply due to API error", botPtr->GetName());
                     }
                     return;
                 }
-                PlayerbotAI* botAI = sPlayerbotsMgr->GetPlayerbotAI(botPtr);
+                PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(botPtr);
                 if (!botAI)
                 {
                     if(g_DebugEnabled)
@@ -1092,6 +1084,25 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                     }
                     return;
                 }
+                
+                // Simulate typing delay if enabled
+                if (g_EnableTypingSimulation)
+                {
+                    uint32_t delay = g_TypingSimulationBaseDelay + (response.length() * g_TypingSimulationDelayPerChar);
+                    if (g_DebugEnabled)
+                        LOG_INFO("server.loading", "[OllamaChat] Bot {} simulating typing delay: {}ms for {} characters", 
+                                 botPtr->GetName(), delay, response.length());
+                    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+                    
+                    // Reacquire pointers after delay
+                    botPtr = ObjectAccessor::FindPlayer(ObjectGuid(botGuid));
+                    if (!botPtr) return;
+                    botAI = PlayerbotsMgr::instance().GetPlayerbotAI(botPtr);
+                    if (!botAI) return;
+                    senderPtr = ObjectAccessor::FindPlayer(ObjectGuid(senderGuid));
+                    if (!senderPtr) return;
+                }
+                
                 // Route the response.
                 if (channelId != 0 && !channelName.empty())
                 {
@@ -1228,14 +1239,14 @@ static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatCh
 {
     if (!bot || !player || bot == player)
         return false;
-    if (!sPlayerbotsMgr->GetPlayerbotAI(bot))
+    if (!PlayerbotsMgr::instance().GetPlayerbotAI(bot))
         return false;
         
     // For whispers, only the specific receiver should respond
     if (source == SRC_WHISPER_LOCAL)
     {
         // Don't allow bot-to-bot whisper responses
-        PlayerbotAI* senderAI = sPlayerbotsMgr->GetPlayerbotAI(player);
+        PlayerbotAI* senderAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
         if (senderAI && senderAI->IsBotAI())
         {
             return false;
@@ -1340,7 +1351,7 @@ std::string GenerateBotPrompt(Player* bot, std::string playerMessage, Player* pl
     if (!bot || !player) {
         return "";
     }
-    PlayerbotAI* botAI = sPlayerbotsMgr->GetPlayerbotAI(bot);
+    PlayerbotAI* botAI = PlayerbotsMgr::instance().GetPlayerbotAI(bot);
     if (botAI == nullptr) {
         return "";
     }
