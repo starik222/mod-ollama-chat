@@ -1,4 +1,4 @@
-#include "Log.h"
+﻿#include "Log.h"
 #include "Language.h"
 #include "Player.h"
 #include "Chat.h"
@@ -8,6 +8,7 @@
 #include "Config.h"
 #include "Common.h"
 #include "Guild.h"
+#include "GuildMgr.h"
 #include "ObjectAccessor.h"
 #include "World.h"
 #include "AiFactory.h"
@@ -93,15 +94,24 @@ static std::string FormatPlayerRace(uint8_t raceId)
 
 const char* ChatChannelSourceLocalStr[] =
 {
-    "Undefined",
-    "Say",
-    "Party",
-    "Raid", 
-    "Guild",
-    "Officer",
-    "Yell",
-    "Whisper",
-    "General"
+    "Undefined",  // 0
+    "Say",        // 1
+    "Party",      // 2
+    "Raid",       // 3
+    "Guild",      // 4
+    "Officer",    // 5
+    "Yell",       // 6
+    "Whisper",    // 7
+    "Unknown8",   // 8
+    "Unknown9",   // 9
+    "Unknown10",  // 10
+    "Unknown11",  // 11
+    "Unknown12",  // 12
+    "Unknown13",  // 13
+    "Unknown14",  // 14
+    "Unknown15",  // 15
+    "Unknown16",  // 16
+    "General"     // 17
 };
 
 std::string GetConversationEntryKey(uint64_t botGuid, uint64_t playerGuid, const std::string& playerMessage, const std::string& botReply)
@@ -298,6 +308,157 @@ void SaveBotConversationHistoryToDB()
     CharacterDatabase.Execute(SafeFormat(cleanupQuery, g_MaxConversationHistory));
 }
 
+// Called when a bot sends a message (random chatter or other bot-initiated messages)
+// This triggers other bots to potentially reply
+void ProcessBotChatMessage(Player* bot, const std::string& msg, ChatChannelSourceLocal sourceLocal, Channel* channel)
+{
+    if (!bot || msg.empty())
+        return;
+        
+    // If channel is nullptr but this is a channel-type message, try to find the channel
+    if (!channel && sourceLocal == SRC_GENERAL_LOCAL)
+    {
+        // Look up the General channel for this bot's faction
+        std::string channelName = "General";
+        ChannelMgr* cMgr = ChannelMgr::forTeam(bot->GetTeamId());
+        if (cMgr)
+        {
+            channel = cMgr->GetChannel(channelName, bot);
+            if (g_DebugEnabled)
+            {
+                if (channel)
+                    LOG_INFO("server.loading", "[Ollama Chat] ProcessBotChatMessage: Found General channel for bot {}", bot->GetName());
+                else
+                    LOG_ERROR("server.loading", "[Ollama Chat] ProcessBotChatMessage: Could not find General channel for bot {}", bot->GetName());
+            }
+        }
+    }
+    
+    // Validate that bot is actually in the relevant chat group before triggering replies
+    bool canSendMessage = false;
+    switch (sourceLocal)
+    {
+        case SRC_SAY_LOCAL:
+        case SRC_YELL_LOCAL:
+            // Distance checks will be applied during eligibility filtering
+            canSendMessage = true;
+            break;
+            
+        case SRC_GENERAL_LOCAL:
+            // Must have a channel object
+            canSendMessage = (channel != nullptr);
+            if (!canSendMessage && g_DebugEnabled)
+                LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot send to General - no channel found", bot->GetName());
+            break;
+            
+        case SRC_GUILD_LOCAL:
+        case SRC_OFFICER_LOCAL:
+            // Must be in a guild with at least one real player online
+            if (bot->GetGuildId() != 0)
+            {
+                Guild* guild = sGuildMgr->GetGuildById(bot->GetGuildId());
+                if (guild)
+                {
+                    // Check if any real (non-bot) players are online in this guild
+                    bool hasRealPlayer = false;
+                    for (auto const& pair : ObjectAccessor::GetPlayers())
+                    {
+                        Player* member = pair.second;
+                        if (member && member->GetGuildId() == bot->GetGuildId())
+                        {
+                            if (!PlayerbotsMgr::instance().GetPlayerbotAI(member))
+                            {
+                                hasRealPlayer = true;
+                                break;
+                            }
+                        }
+                    }
+                    canSendMessage = hasRealPlayer;
+                    if (!canSendMessage && g_DebugEnabled)
+                        LOG_INFO("server.loading", "[Ollama Chat] Bot {} cannot send to Guild - no real players online in guild", bot->GetName());
+                }
+                else
+                {
+                    canSendMessage = false;
+                    if (g_DebugEnabled)
+                        LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot send to Guild - guild not found", bot->GetName());
+                }
+            }
+            else
+            {
+                canSendMessage = false;
+                if (g_DebugEnabled)
+                    LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot send to Guild - not in a guild", bot->GetName());
+            }
+            break;
+            
+        case SRC_PARTY_LOCAL:
+        case SRC_RAID_LOCAL:
+            // Must be in a group with at least one real player
+            if (bot->GetGroup())
+            {
+                Group* group = bot->GetGroup();
+                bool hasRealPlayer = false;
+                for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+                {
+                    Player* member = ref->GetSource();
+                    if (member && !PlayerbotsMgr::instance().GetPlayerbotAI(member))
+                    {
+                        hasRealPlayer = true;
+                        break;
+                    }
+                }
+                canSendMessage = hasRealPlayer;
+                if (!canSendMessage && g_DebugEnabled)
+                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} cannot send to Party - no real players in group", bot->GetName());
+            }
+            else
+            {
+                canSendMessage = false;
+                if (g_DebugEnabled)
+                    LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot send to Party - not in a group", bot->GetName());
+            }
+            break;
+            
+        case SRC_WHISPER_LOCAL:
+            // Whispers are handled separately
+            canSendMessage = true;
+            break;
+            
+        default:
+            canSendMessage = true;
+            break;
+    }
+    
+    if (!canSendMessage)
+    {
+        if (g_DebugEnabled)
+            LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot send message to {} - validation failed", 
+                    bot->GetName(), ChatChannelSourceLocalStr[sourceLocal]);
+        return;
+    }
+        
+    // Convert ChatChannelSourceLocal back to chat type for ProcessChat
+    uint32_t type = 0;
+    switch (sourceLocal)
+    {
+        case SRC_SAY_LOCAL: type = CHAT_MSG_SAY; break;
+        case SRC_YELL_LOCAL: type = CHAT_MSG_YELL; break;
+        case SRC_PARTY_LOCAL: type = CHAT_MSG_PARTY; break;
+        case SRC_RAID_LOCAL: type = CHAT_MSG_RAID; break;
+        case SRC_GUILD_LOCAL: type = CHAT_MSG_GUILD; break;
+        case SRC_OFFICER_LOCAL: type = CHAT_MSG_OFFICER; break;
+        case SRC_WHISPER_LOCAL: type = CHAT_MSG_WHISPER; break;
+        case SRC_GENERAL_LOCAL: type = CHAT_MSG_CHANNEL; break;
+        default: type = CHAT_MSG_SAY; break;
+    }
+    
+    std::string mutableMsg = msg; // ProcessChat takes non-const reference
+    uint32_t lang = bot->GetTeamId() == TEAM_ALLIANCE ? LANG_COMMON : LANG_ORCISH;
+    
+    // Call the main ProcessChat function with bot as sender
+    PlayerBotChatHandler::ProcessChat(bot, type, lang, mutableMsg, sourceLocal, channel, nullptr);
+}
 
 std::string GetBotHistoryPrompt(uint64_t botGuid, uint64_t playerGuid, std::string playerMessage)
 {
@@ -693,6 +854,43 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             return;
         }
     }
+    
+    // Check if this channel type is disabled
+    if (sourceLocal == SRC_GENERAL_LOCAL && g_DisableForCustomChannels)
+    {
+        if (g_DebugEnabled)
+        {
+            LOG_INFO("server.loading", "[Ollama Chat] Custom channels are disabled, skipping");
+        }
+        return;
+    }
+    
+    if ((sourceLocal == SRC_SAY_LOCAL || sourceLocal == SRC_YELL_LOCAL) && g_DisableForSayYell)
+    {
+        if (g_DebugEnabled)
+        {
+            LOG_INFO("server.loading", "[Ollama Chat] Say/Yell channels are disabled, skipping");
+        }
+        return;
+    }
+    
+    if ((sourceLocal == SRC_GUILD_LOCAL || sourceLocal == SRC_OFFICER_LOCAL) && g_DisableForGuild)
+    {
+        if (g_DebugEnabled)
+        {
+            LOG_INFO("server.loading", "[Ollama Chat] Guild channels are disabled, skipping");
+        }
+        return;
+    }
+    
+    if ((sourceLocal == SRC_PARTY_LOCAL || sourceLocal == SRC_RAID_LOCAL) && g_DisableForParty)
+    {
+        if (g_DebugEnabled)
+        {
+            LOG_INFO("server.loading", "[Ollama Chat] Party/Raid channels are disabled, skipping");
+        }
+        return;
+    }
              
     PlayerbotAI* senderAI = PlayerbotsMgr::instance().GetPlayerbotAI(player);
     bool senderIsBot = (senderAI && senderAI->IsBotAI());
@@ -770,10 +968,6 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             PlayerbotAI* candidateAI = PlayerbotsMgr::instance().GetPlayerbotAI(candidate);
             if (!candidateAI || !candidateAI->IsBotAI())
                 continue;
-                
-            // Only include regular player accounts
-            if (!AccountMgr::IsPlayerAccount(candidate->GetSession()->GetSecurity()))
-                continue;
             
             // Check if this is a local or global channel
             bool isLocalChannel = (channel->GetName().find("General -") != std::string::npos || 
@@ -797,6 +991,16 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             }
             // For global channels like World, no zone restriction
             
+            // CHANNEL MEMBERSHIP CHECK: Bot must actually be in the channel
+            if (!candidate->IsInChannel(channel))
+            {
+                if(g_DebugEnabled)
+                {
+                    //LOG_INFO("server.loading", "[Ollama Chat] Bot {} not in channel '{}', skipping", candidate->GetName(), channel->GetName());
+                }
+                continue;
+            }
+            
             // FACTION CHECK: For non-global channels, ensure same faction
             if (candidate->GetTeamId() != player->GetTeamId())
             {
@@ -808,6 +1012,41 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                     }
                     continue; // SKIP this bot - wrong faction
                 }
+            }
+            
+            // CHANNEL MEMBERSHIP CHECK: Verify bot is actually in the channel
+            if (!candidate->IsInChannel(channel))
+            {
+                if(g_DebugEnabled)
+                {
+                    //LOG_ERROR("server.loading", "[Ollama Chat] Bot {} FAILED channel membership check - Not in channel '{}'", candidate->GetName(), channel->GetName());
+                }
+                continue; // SKIP this bot - not in the channel
+            }
+            
+            // REAL PLAYER CHECK: Channel must have at least one real player
+            bool hasRealPlayerInChannel = false;
+            for (auto const& playerItr : allPlayers)
+            {
+                Player* potentialRealPlayer = playerItr.second;
+                if (potentialRealPlayer && potentialRealPlayer->IsInChannel(channel))
+                {
+                    PlayerbotAI* realPlayerAI = PlayerbotsMgr::instance().GetPlayerbotAI(potentialRealPlayer);
+                    if (!realPlayerAI || !realPlayerAI->IsBotAI())
+                    {
+                        hasRealPlayerInChannel = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!hasRealPlayerInChannel)
+            {
+                if(g_DebugEnabled)
+                {
+                    //LOG_INFO("server.loading", "[Ollama Chat] Bot {} skipped - no real players in channel '{}'", candidate->GetName(), channel->GetName());
+                }
+                continue;
             }
             
             // ONLY add bots that passed ALL verifications
@@ -836,6 +1075,84 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                 PlayerbotAI* candidateAI = PlayerbotsMgr::instance().GetPlayerbotAI(candidate);
                 if (candidateAI && candidateAI->IsBotAI())
                 {
+                    // For Guild/Party, verify there's a real player in that guild/party
+                    if (sourceLocal == SRC_GUILD_LOCAL || sourceLocal == SRC_OFFICER_LOCAL)
+                    {
+                        if (candidate->GetGuildId() != 0)
+                        {
+                            // Check if any real player is online in this guild
+                            bool hasRealPlayerInGuild = false;
+                            for (auto const& guildPlayerItr : allPlayers)
+                            {
+                                Player* guildMember = guildPlayerItr.second;
+                                if (guildMember && guildMember->GetGuildId() == candidate->GetGuildId())
+                                {
+                                    PlayerbotAI* memberAI = PlayerbotsMgr::instance().GetPlayerbotAI(guildMember);
+                                    if (!memberAI || !memberAI->IsBotAI())
+                                    {
+                                        hasRealPlayerInGuild = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!hasRealPlayerInGuild)
+                                continue; // Skip bot - no real players in guild
+                        }
+                    }
+                    else if (sourceLocal == SRC_PARTY_LOCAL || sourceLocal == SRC_RAID_LOCAL)
+                    {
+                        Group* group = candidate->GetGroup();
+                        if (group)
+                        {
+                            // Check if any real player is in this group
+                            bool hasRealPlayerInGroup = false;
+                            for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+                            {
+                                Player* member = ref->GetSource();
+                                if (member)
+                                {
+                                    PlayerbotAI* memberAI = PlayerbotsMgr::instance().GetPlayerbotAI(member);
+                                    if (!memberAI || !memberAI->IsBotAI())
+                                    {
+                                        hasRealPlayerInGroup = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!hasRealPlayerInGroup)
+                                continue; // Skip bot - no real players in group
+                        }
+                    }
+                    else if (sourceLocal == SRC_SAY_LOCAL || sourceLocal == SRC_YELL_LOCAL)
+                    {
+                        // For Say/Yell, require a real player within hearing distance
+                        float threshold = (sourceLocal == SRC_SAY_LOCAL) ? g_SayDistance : g_YellDistance;
+                        bool hasRealPlayerNearby = false;
+                        
+                        if (candidate->IsInWorld() && threshold > 0.0f)
+                        {
+                            for (auto const& nearbyPlayerItr : allPlayers)
+                            {
+                                Player* nearbyPlayer = nearbyPlayerItr.second;
+                                if (nearbyPlayer && nearbyPlayer->IsInWorld())
+                                {
+                                    PlayerbotAI* nearbyAI = PlayerbotsMgr::instance().GetPlayerbotAI(nearbyPlayer);
+                                    if (!nearbyAI || !nearbyAI->IsBotAI())
+                                    {
+                                        if (candidate->GetDistance(nearbyPlayer) <= threshold)
+                                        {
+                                            hasRealPlayerNearby = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!hasRealPlayerNearby)
+                            continue; // Skip bot - no real player can hear Say/Yell
+                    }
+                    
                     eligibleBots.push_back(candidate);
                 }
             }
@@ -843,6 +1160,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
     }
     
     std::vector<Player*> candidateBots;
+    int notEligibleCount = 0;
     for (Player* bot : eligibleBots)
     {
         if (!bot)
@@ -850,89 +1168,66 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             continue;
         }
         
-        // Apply party restriction for all messages
-        if (g_RestrictBotsToPartyMembers)
-        {
-            Group* botGroup = bot->GetGroup();
-            Group* playerGroup = player->GetGroup();
-            
-            // Both must be in a group
-            if (!botGroup || !playerGroup)
-            {
-                continue;
-            }
-            
-            // Must be the same group
-            if (botGroup != playerGroup)
-            {
-                continue;
-            }
-            
-            // Group must not be a raid (battleground raids are allowed)
-            if (botGroup->isRaidGroup() && !botGroup->isBGGroup())
-            {
-                continue;
-            }
-            
-            // At least one real player must be in the group (should be true since player is real)
-            bool hasRealPlayer = false;
-            for (GroupReference* ref = botGroup->GetFirstMember(); ref; ref = ref->next())
-            {
-                Player* member = ref->GetSource();
-                if (member && !PlayerbotsMgr::instance().GetPlayerbotAI(member))
-                {
-                    hasRealPlayer = true;
-                    break;
-                }
-            }
-            
-            if (!hasRealPlayer)
-            {
-                continue;
-            }
-            
-            // When party restriction is enabled, only allow party/raid/whisper chat responses
-            // Block guild, say, yell, and other non-party communication
-            if (sourceLocal != SRC_PARTY_LOCAL && sourceLocal != SRC_RAID_LOCAL && sourceLocal != SRC_WHISPER_LOCAL)
-            {
-                continue;
-            }
-        }
-        
         // For channel messages, bots in eligibleBots have already passed STRICT channel checks
         // Only run additional eligibility checks for non-channel sources
-        if (channel != nullptr)
+        // EXCEPTION: If channel is nullptr but sourceLocal is a channel type (like GENERAL), 
+        // treat it as a channel message (happens with bot-initiated messages)
+        bool isChannelSource = (sourceLocal == SRC_GENERAL_LOCAL);
+        
+        if (channel != nullptr || isChannelSource)
         {
             // Channel bots have already been verified to be in EXACT same channel instance
+            // OR this is a channel-type source (General) even without channel object
             candidateBots.push_back(bot);
         }
         else
         {
-            // For non-channel sources, run the full eligibility check
+            // For non-channel sources (Say/Yell/Guild/Party/Whisper), run the full eligibility check
             if (IsBotEligibleForChatChannelLocal(bot, player, sourceLocal, channel, receiver))
                 candidateBots.push_back(bot);
+            else
+                notEligibleCount++;
         }
     }
     
-    uint32_t chance = senderIsBot ? g_BotReplyChance : g_PlayerReplyChance;
-    if (senderIsBot)
+    if (g_DebugEnabled && notEligibleCount > 0)
     {
-        bool realPlayerNearby = false;
-        for (auto const& itr : ObjectAccessor::GetPlayers())
-        {
-            Player* candidate = itr.second;
-            if (candidate == player)
-                continue;
-            if (!candidate->IsInWorld())
-                continue;
-            if (!PlayerbotsMgr::instance().GetPlayerbotAI(candidate))
-            {
-                realPlayerNearby = true;
-                break;
-            }
-        }
-        if (!realPlayerNearby)
-            chance = 0;
+        LOG_INFO("server.loading", "[Ollama Chat] {} bots not eligible for {} (distance/guild/party checks failed)", 
+                notEligibleCount, ChatChannelSourceLocalStr[sourceLocal]);
+    }
+    
+    // Determine reply chance based on channel type
+    uint32_t chance;
+    if (sourceLocal == SRC_SAY_LOCAL || sourceLocal == SRC_YELL_LOCAL)
+    {
+        // Say/Yell channel type
+        chance = senderIsBot ? g_BotReplyChance_Say : g_PlayerReplyChance_Say;
+    }
+    else if (sourceLocal == SRC_PARTY_LOCAL || sourceLocal == SRC_RAID_LOCAL)
+    {
+        // Party/Raid channel type
+        chance = senderIsBot ? g_BotReplyChance_Party : g_PlayerReplyChance_Party;
+    }
+    else if (sourceLocal == SRC_GUILD_LOCAL || sourceLocal == SRC_OFFICER_LOCAL)
+    {
+        // Guild/Officer channel type
+        chance = senderIsBot ? g_BotReplyChance_Guild : g_PlayerReplyChance_Guild;
+    }
+    else if (sourceLocal == SRC_GENERAL_LOCAL)
+    {
+        // General/Trade/Custom channel type
+        chance = senderIsBot ? g_BotReplyChance_Channel : g_PlayerReplyChance_Channel;
+    }
+    else
+    {
+        // Default fallback (whispers, etc.) - use Say chances
+        chance = senderIsBot ? g_BotReplyChance_Say : g_PlayerReplyChance_Say;
+    }
+    
+    if(g_DebugEnabled)
+    {
+        LOG_INFO("server.loading", "[Ollama Chat] Sender: {} ({}), Channel: {}, Reply Chance: {}%, Candidate Bots: {}",
+                player->GetName(), senderIsBot ? "BOT" : "PLAYER", ChatChannelSourceLocalStr[sourceLocal], chance, candidateBots.size());
     }
     
     std::vector<Player*> finalCandidates;
@@ -958,6 +1253,39 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         // Handle non-whisper chats with normal multi-bot logic
         std::vector<std::pair<size_t, Player*>> mentionedBots;
 
+        // Helper to convert string to lowercase safely
+        auto toLowerStr = [](const std::string& str) -> std::string {
+            std::string result = str;
+            for (char& c : result)
+            {
+                c = std::tolower(static_cast<unsigned char>(c));
+            }
+            return result;
+        };
+
+        // Helper to check if a bot name is mentioned as a complete word
+        auto isBotNameMentioned = [&trimmedMsg, &toLowerStr](const std::string& botName) -> size_t {
+            std::string lowerMsg = toLowerStr(trimmedMsg);
+            std::string lowerBotName = toLowerStr(botName);
+            
+            size_t pos = 0;
+            while ((pos = lowerMsg.find(lowerBotName, pos)) != std::string::npos)
+            {
+                // Check if it's a word boundary before the name
+                bool validStart = (pos == 0 || !std::isalnum(static_cast<unsigned char>(lowerMsg[pos - 1])));
+                // Check if it's a word boundary after the name
+                size_t endPos = pos + lowerBotName.length();
+                bool validEnd = (endPos >= lowerMsg.length() || !std::isalnum(static_cast<unsigned char>(lowerMsg[endPos])));
+                
+                if (validStart && validEnd)
+                {
+                    return pos; // Found a valid word-boundary match
+                }
+                pos++; // Continue searching
+            }
+            return std::string::npos;
+        };
+
         for (Player* bot : candidateBots)
         {
             if (!bot)
@@ -968,21 +1296,32 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             {
                 continue;
             }
-            size_t pos = trimmedMsg.find(bot->GetName());
+            
+            size_t pos = isBotNameMentioned(bot->GetName());
             if (pos != std::string::npos)
             {
                 mentionedBots.emplace_back(pos, bot);
+                if(g_DebugEnabled)
+                {
+                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} mentioned at position {} in message", bot->GetName(), pos);
+                }
             }
         }
 
         if (!mentionedBots.empty())
         {
+            // Sort by position to get the first mentioned bot
             std::sort(mentionedBots.begin(), mentionedBots.end(),
-                      [](auto &a, auto &b) { return a.first < b.first; });
+                      [](const std::pair<size_t, Player*> &a, const std::pair<size_t, Player*> &b) { return a.first < b.first; });
             Player* chosen = mentionedBots.front().second;
             if (!(g_DisableRepliesInCombat && chosen->IsInCombat()))
             {
                 finalCandidates.push_back(chosen);
+                if(g_DebugEnabled)
+                {
+                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} selected (mentioned first at position {})", 
+                            chosen->GetName(), mentionedBots.front().first);
+                }
             }
         }
         else
@@ -991,11 +1330,24 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
             {
                 if (g_DisableRepliesInCombat && bot->IsInCombat())
                 {
+                    if(g_DebugEnabled)
+                    {
+                        LOG_INFO("server.loading", "[Ollama Chat] Bot {} skipped - in combat", bot->GetName());
+                    }
                     continue;
                 }
-                if (urand(0, 99) < chance)
+                uint32_t roll = urand(0, 99);
+                if (roll < chance)
                 {
                     finalCandidates.push_back(bot);
+                    if(g_DebugEnabled)
+                    {
+                        LOG_INFO("server.loading", "[Ollama Chat] Bot {} PASSED chance roll ({} < {}%)", bot->GetName(), roll, chance);
+                    }
+                }
+                else if(g_DebugEnabled)
+                {
+                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} FAILED chance roll ({} >= {}%)", bot->GetName(), roll, chance);
                 }
             }
         }
@@ -1006,6 +1358,10 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
     {
         if(g_DebugEnabled)
         {
+            LOG_INFO("server.loading", "[Ollama Chat] *** NO BOTS RESPONDING *** to {} from {} in {} channel. "
+                    "Eligible: {}, Candidates: {}, Final: 0, Chance: {}%",
+                    senderIsBot ? "BOT" : "PLAYER", player->GetName(), ChatChannelSourceLocalStr[sourceLocal],
+                    eligibleBots.size(), candidateBots.size(), chance);
             LOG_INFO("server.loading", "[Ollama Chat] No eligible bots found to respond to message '{}'. "
                     "Source: {}, Eligible bots: {}, Candidate bots: {}, Combat disabled: {}",
                     msg, ChatChannelSourceLocalStr[sourceLocal], eligibleBots.size(), 
@@ -1020,7 +1376,24 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
         std::mt19937 g(rd());
         std::shuffle(finalCandidates.begin(), finalCandidates.end(), g);
         uint32_t countToPick = urand(1, g_MaxBotsToPick);
+        if(g_DebugEnabled)
+        {
+            LOG_INFO("server.loading", "[Ollama Chat] Limiting {} bots to {} (MaxBotsToPick)", finalCandidates.size(), countToPick);
+        }
         finalCandidates.resize(countToPick);
+    }
+    
+    if(g_DebugEnabled && !finalCandidates.empty())
+    {
+        std::string botNames;
+        for (Player* bot : finalCandidates)
+        {
+            if (!botNames.empty()) botNames += ", ";
+            botNames += bot->GetName();
+        }
+        LOG_INFO("server.loading", "[Ollama Chat] *** {} BOTS RESPONDING *** to {} from {} in {}: [{}]",
+                finalCandidates.size(), senderIsBot ? "BOT" : "PLAYER", player->GetName(),
+                ChatChannelSourceLocalStr[sourceLocal], botNames);
     }
     
     uint64_t senderGuid = player->GetGUID().GetRawValue();
@@ -1127,6 +1500,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                                             botPtr->GetName(), channelName);
                                 }
                                 targetChannel->Say(botPtr->GetGUID(), response, LANG_UNIVERSAL);
+                                ProcessBotChatMessage(botPtr, response, SRC_GENERAL_LOCAL, targetChannel);
                                 if(g_DebugEnabled)
                                 {
                                     LOG_INFO("server.loading", "[Ollama Chat] Bot {} responded in channel {}: {}", 
@@ -1137,22 +1511,20 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                             {
                                 if(g_DebugEnabled)
                                 {
-                                    LOG_ERROR("server.loading", "[Ollama Chat] Bot {} NOT in channel '{}' according to IsInChannel check", 
+                                    LOG_ERROR("server.loading", "[Ollama Chat] Bot {} NOT in channel '{}' according to IsInChannel check - skipping reply", 
                                                 botPtr->GetName(), channelName);
                                 }
-                                // Fallback to normal bot speech
-                                botAI->Say(response);
+                                // Don't fallback to Say - if bot isn't in the channel, don't reply at all
                             }
                         }
                         else
                         {
                             if(g_DebugEnabled)
                             {
-                                LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot find channel '{}' (ID: {}) for team {}", 
+                                LOG_ERROR("server.loading", "[Ollama Chat] Bot {} cannot find channel '{}' (ID: {}) for team {} - skipping reply", 
                                          botPtr->GetName(), channelName, channelId, (int)botPtr->GetTeamId());
                             }
-                            // Fallback to normal bot speech
-                            botAI->Say(response);
+                            // Don't fallback to Say - if channel doesn't exist, don't reply at all
                         }
                     }
                 }
@@ -1161,22 +1533,84 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                     switch (sourceLocal)
                     {
                         case SRC_GUILD_LOCAL: 
-                            botAI->SayToGuild(response); 
+                            botAI->SayToGuild(response);
+                            ProcessBotChatMessage(botPtr, response, SRC_GUILD_LOCAL, nullptr);
                             break;
                         case SRC_OFFICER_LOCAL: 
-                            botAI->SayToGuild(response); 
+                            botAI->SayToGuild(response);
+                            ProcessBotChatMessage(botPtr, response, SRC_OFFICER_LOCAL, nullptr);
                             break;
                         case SRC_PARTY_LOCAL: 
-                            botAI->SayToParty(response); 
+                            botAI->SayToParty(response);
+                            ProcessBotChatMessage(botPtr, response, SRC_PARTY_LOCAL, nullptr);
                             break;
                         case SRC_RAID_LOCAL:  
-                            botAI->SayToRaid(response); 
+                            botAI->SayToRaid(response);
+                            ProcessBotChatMessage(botPtr, response, SRC_RAID_LOCAL, nullptr);
                             break;
-                        case SRC_SAY_LOCAL:   
-                            botAI->Say(response); 
+                        case SRC_SAY_LOCAL:
+                            // Only send Say if someone (real player or bot) is within say distance
+                            {
+                                bool someoneCanHear = false;
+                                if (botPtr->IsInWorld())
+                                {
+                                    for (auto const& pair : ObjectAccessor::GetPlayers())
+                                    {
+                                        Player* nearbyPlayer = pair.second;
+                                        if (nearbyPlayer && nearbyPlayer != botPtr && nearbyPlayer->IsInWorld())
+                                        {
+                                            if (botPtr->GetDistance(nearbyPlayer) <= g_SayDistance)
+                                            {
+                                                someoneCanHear = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if (someoneCanHear)
+                                {
+                                    botAI->Say(response);
+                                    ProcessBotChatMessage(botPtr, response, SRC_SAY_LOCAL, nullptr);
+                                }
+                                else if (g_DebugEnabled)
+                                {
+                                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} skipping Say reply - no one within {} yards to hear it", 
+                                            botPtr->GetName(), g_SayDistance);
+                                }
+                            }
                             break;
-                        case SRC_YELL_LOCAL:  
-                            botAI->Yell(response); 
+                        case SRC_YELL_LOCAL:
+                            // Only send Yell if someone is within yell distance
+                            {
+                                bool someoneCanHear = false;
+                                if (botPtr->IsInWorld())
+                                {
+                                    for (auto const& pair : ObjectAccessor::GetPlayers())
+                                    {
+                                        Player* nearbyPlayer = pair.second;
+                                        if (nearbyPlayer && nearbyPlayer != botPtr && nearbyPlayer->IsInWorld())
+                                        {
+                                            if (botPtr->GetDistance(nearbyPlayer) <= g_YellDistance)
+                                            {
+                                                someoneCanHear = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if (someoneCanHear)
+                                {
+                                    botAI->Yell(response);
+                                    ProcessBotChatMessage(botPtr, response, SRC_YELL_LOCAL, nullptr);
+                                }
+                                else if (g_DebugEnabled)
+                                {
+                                    LOG_INFO("server.loading", "[Ollama Chat] Bot {} skipping Yell reply - no one within {} yards to hear it", 
+                                            botPtr->GetName(), g_YellDistance);
+                                }
+                            }
                             break;
                         case SRC_WHISPER_LOCAL:
                             // For whispers, find the original sender and whisper back
@@ -1190,6 +1624,7 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                                                 botPtr->GetName(), response, originalSender->GetName());
                                     }
                                     botAI->Whisper(response, originalSender->GetName());
+                                    // Don't trigger ProcessBotChatMessage for whispers - they're private
                                 }
                                 else if(g_DebugEnabled)
                                 {
@@ -1198,7 +1633,8 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
                             }
                             break;
                         default:              
-                            botAI->Say(response); 
+                            botAI->Say(response);
+                            ProcessBotChatMessage(botPtr, response, SRC_SAY_LOCAL, nullptr);
                             break;
                     }
                 }
@@ -1238,9 +1674,18 @@ void PlayerBotChatHandler::ProcessChat(Player* player, uint32_t /*type*/, uint32
 static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatChannelSourceLocal source, Channel* channel, Player* receiver)
 {
     if (!bot || !player || bot == player)
+    {
+        if (g_DebugEnabled)
+            LOG_INFO("server.loading", "[Ollama Chat] IsBotEligible: FAILED basic check - bot={}, player={}, same={}", 
+                    (void*)bot, (void*)player, (bot == player));
         return false;
+    }
     if (!PlayerbotsMgr::instance().GetPlayerbotAI(bot))
+    {
+        if (g_DebugEnabled)
+            LOG_INFO("server.loading", "[Ollama Chat] IsBotEligible: Bot {} FAILED - no PlayerbotAI", bot->GetName());
         return false;
+    }
         
     // For whispers, only the specific receiver should respond
     if (source == SRC_WHISPER_LOCAL)
@@ -1255,8 +1700,10 @@ static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatCh
         return (receiver && bot == receiver);
     }
     
-    // Check team compatibility for non-whisper chats (except channels which can be cross-faction)
-    if (!channel && bot->GetTeamId() != player->GetTeamId())
+    // Check team compatibility for non-proximity chats (except channels which can be cross-faction)
+    // Say and Yell are proximity-based and don't require same faction
+    bool isProximityChatSource = (source == SRC_SAY_LOCAL || source == SRC_YELL_LOCAL);
+    if (!channel && !isProximityChatSource && bot->GetTeamId() != player->GetTeamId())
         return false;
     
     // For channels, check if bot is in the specific channel instance
@@ -1271,10 +1718,6 @@ static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatCh
             }
             return false;
         }
-        
-        // Early security check before expensive channel lookup
-        if (!AccountMgr::IsPlayerAccount(bot->GetSession()->GetSecurity()))
-            return false;
             
         // ONLY use exact channel instance check - NO Player::IsInChannel() anymore
         ChannelMgr* candidateCMgr = ChannelMgr::forTeam(bot->GetTeamId());
@@ -1318,7 +1761,15 @@ static bool IsBotEligibleForChatChannelLocal(Player* bot, Player* player, ChatCh
     {
         case SRC_SAY_LOCAL:    
             threshold = g_SayDistance;
-            return (threshold > 0.0f && player->GetDistance(bot) <= threshold);
+            if (threshold > 0.0f)
+            {
+                if (!bot->IsInWorld() || !player->IsInWorld())
+                    return false;
+                    
+                float distance = bot->GetDistance(player);
+                return distance <= threshold;
+            }
+            return false;
             
         case SRC_YELL_LOCAL:   
             threshold = g_YellDistance;

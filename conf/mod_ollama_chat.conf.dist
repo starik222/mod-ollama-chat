@@ -141,15 +141,45 @@ OllamaChat.ThinkModeEnableForModule = 0
 # GENERAL CHATTER / RESPONSE LOGIC
 # --------------------------------------------
 
-# OllamaChat.PlayerReplyChance
-#     Description: The percent chance (0-100) that an eligible bot replies when the sender is a player.
+# OllamaChat.PlayerReplyChance.Say
+#     Description: The percent chance (0-100) that an eligible bot replies to a player in Say/Yell channels.
 #     Default:     90
-OllamaChat.PlayerReplyChance = 90
+OllamaChat.PlayerReplyChance.Say = 90
 
-# OllamaChat.BotReplyChance
-#     Description: The percent chance (0-100) that an eligible bot replies when the sender is an AI bot.
+# OllamaChat.BotReplyChance.Say
+#     Description: The percent chance (0-100) that an eligible bot replies to another bot in Say/Yell channels.
 #     Default:     10
-OllamaChat.BotReplyChance = 10
+OllamaChat.BotReplyChance.Say = 10
+
+# OllamaChat.PlayerReplyChance.Channel
+#     Description: The percent chance (0-100) that an eligible bot replies to a player in custom channels (General, Trade, etc.).
+#     Default:     60
+OllamaChat.PlayerReplyChance.Channel = 60
+
+# OllamaChat.BotReplyChance.Channel
+#     Description: The percent chance (0-100) that an eligible bot replies to another bot in custom channels (General, Trade, etc.).
+#     Default:     3
+OllamaChat.BotReplyChance.Channel = 3
+
+# OllamaChat.PlayerReplyChance.Party
+#     Description: The percent chance (0-100) that an eligible bot replies to a player in Party/Raid chat.
+#     Default:     90
+OllamaChat.PlayerReplyChance.Party = 90
+
+# OllamaChat.BotReplyChance.Party
+#     Description: The percent chance (0-100) that an eligible bot replies to another bot in Party/Raid chat.
+#     Default:     25
+OllamaChat.BotReplyChance.Party = 25
+
+# OllamaChat.PlayerReplyChance.Guild
+#     Description: The percent chance (0-100) that an eligible bot replies to a player in Guild/Officer chat.
+#     Default:     70
+OllamaChat.PlayerReplyChance.Guild = 70
+
+# OllamaChat.BotReplyChance.Guild
+#     Description: The percent chance (0-100) that an eligible bot replies to another bot in Guild/Officer chat.
+#     Default:     5
+OllamaChat.BotReplyChance.Guild = 5
 
 # OllamaChat.EnableWhisperReplies
 #     Description: Enable or disable bot responses to whisper messages.
@@ -179,11 +209,29 @@ OllamaChat.SayDistance = 30.0
 #     Default:     100.0
 OllamaChat.YellDistance = 100.0
 
-# OllamaChat.RestrictBotsToPartyMembers
-#     Description: When enabled (1), bots will only respond to real player messages/events when they are in the same non-raid party.
-#                  Bot-to-bot communication within parties is still allowed. This helps reduce spam while maintaining party functionality.
+# OllamaChat.DisableForCustomChannels
+#     Description: When enabled (1), disables Ollama bot replies, random chatter, and events in custom channels (General, Trade, LookingForGroup, etc.).
+#                  This allows you to reduce spam in public channels while keeping bot interactions in other chat types.
 #     Default:     0 (false)
-OllamaChat.RestrictBotsToPartyMembers = 0
+OllamaChat.DisableForCustomChannels = 0
+
+# OllamaChat.DisableForSayYell
+#     Description: When enabled (1), disables Ollama bot replies, random chatter, and events in Say and Yell channels.
+#                  Useful if you want bots to be silent in proximity-based chats.
+#     Default:     0 (false)
+OllamaChat.DisableForSayYell = 0
+
+# OllamaChat.DisableForGuild
+#     Description: When enabled (1), disables Ollama bot replies, random chatter, and events in Guild and Officer channels.
+#                  Useful for keeping guild chat focused without bot chatter.
+#     Default:     0 (false)
+OllamaChat.DisableForGuild = 0
+
+# OllamaChat.DisableForParty
+#     Description: When enabled (1), disables Ollama bot replies, random chatter, and events in Party and Raid channels.
+#                  Useful if you want party chat to be bot-free.
+#     Default:     0 (false)
+OllamaChat.DisableForParty = 0
 
 # --------------------------------------------
 # RANDOM CHATTER SYSTEM
@@ -211,8 +259,8 @@ OllamaChat.MaxRandomInterval = 180
 
 # OllamaChat.RandomChatterRealPlayerDistance
 #     Description: The maximum distance (in game units) a real player must be within for random bot chatter to trigger.
-#     Default:     40
-OllamaChat.RandomChatterRealPlayerDistance = 40.0
+#     Default:     200.0
+OllamaChat.RandomChatterRealPlayerDistance = 200.0
 
 # OllamaChat.RandomChatterBotCommentChance
 #     Description: The percent chance (0-100) that an AI bot will add a comment when random chatter is triggered.
@@ -231,6 +279,26 @@ OllamaChat.RandomChatterMaxBotsPerPlayer = 2
 #   Placeholders (named): {bot_name} {bot_level} {bot_class} {bot_race} {bot_gender} {bot_role} {bot_faction} {bot_area} {bot_zone} {bot_map} {bot_personality} {bot_personality_name} {environment_info}
 #   Note: {bot_personality_name} contains the name/key of the personality (e.g., "grumpy", "helpful"), while {bot_personality} contains the full personality description text.
 OllamaChat.RandomChatterPromptTemplate = "You are a Wrath-era WoW player. Name: {bot_name}, Level: {bot_level} {bot_class}, {bot_race} {bot_gender}, Spec: {bot_role}, Faction: {bot_faction}. Location: {bot_area}, Zone: {bot_zone}, Map: {bot_map}. MAKE SURE YOU RESPOND USING YOUR PERSONALITY, WHICH IS: {bot_personality_name}: {bot_personality}. {environment_info} Reply casually in under 15 words. No quotes, markdown, symbols, or emojis. Use real WoW slang. Avoid uncommon jargon or formatting."
+
+# OllamaChat.RandomChatterPromptVariations
+#   Description: Pipe-separated (|) list of additional prompt instructions that will be randomly selected and appended to the RandomChatterPromptTemplate.
+#                This adds variety to bot responses by changing the angle or focus of their random chatter.
+#                One variation is randomly chosen each time a bot generates random chatter.
+#                Leave empty to disable variations and use only the base template.
+#   Example:     "Talk about the weather or environment.|Comment on your current task or goal.|Make an observation about nearby creatures or players."
+#   Default:     (see below for Wrath-era appropriate variations)
+OllamaChat.RandomChatterPromptVariations = "Complain about something typical WoW players complain about.|Make a casual observation about leveling or grinding.|Share your opinion on Horde vs Alliance.|Comment on how tough or easy the zone feels.|Make a joke or sarcastic remark about WoW.|Mention something about the Lich King expansion.|Talk about wanting better gear or loot.|Comment on flying mounts or Northrend travel.|Complain about repair costs or gold.|Make an observation about your class in general.|Comment on dungeon finder or group content.|Talk about daily quests or reputation grinds.|Mention Death Knights being OP or annoying.|Share your thoughts on arena or battlegrounds.|Complain about nerfed abilities or changes.|Talk about needing to farm materials or gold.|Comment on the cold weather in Northrend.|Mention wanting to raid or do heroics.|Talk about achievements being too grindy.|Make a casual remark about quest objectives."
+
+# OllamaChat.RandomChatterQuestionVariations
+#   Description: Pipe-separated (|) list of prompt instructions telling the LLM to generate questions that will stimulate OTHER bots or players to respond.
+#                When a bot uses one of these variations, the LLM will generate a question based on the prompt instruction.
+#                These questions are meant to encourage other bots (via BotReplyChance) and real players to engage in conversation.
+#                When a bot generates random chatter, it will randomly choose between making a statement (RandomChatterPromptVariations)
+#                or asking a question (RandomChatterQuestionVariations).
+#                Leave empty to disable question variations and only use statement variations.
+#   Example:     "Ask about dungeon preferences.|Ask if anyone wants to PvP.|Ask about raid progression."
+#   Default:     (see below for engaging Wrath-era question prompts designed to stimulate bot-to-bot and player-to-bot conversations)
+OllamaChat.RandomChatterQuestionVariations = "Ask if others think this zone is difficult.|Ask about favorite dungeons.|Ask about Icecrown Citadel progression.|Ask about daily quest frustrations.|Ask about Naxxramas difficulty compared to original.|Ask what spec people are running.|Ask about Death Knight popularity.|Ask about upcoming Death Knight nerfs.|Ask about gold-making strategies in Wrath.|Ask if anyone is farming badges.|Ask about excitement for Ulduar.|Ask if dual spec was worth the cost.|Ask about opinions on the old talent trees.|Ask about favorite raid bosses.|Ask if flying mounts ruined world PvP.|Ask who's doing arena this season.|Ask about arena ratings.|Ask about Wintergrasp balance.|Ask about Oculus dungeon opinions.|Ask which professions make the most gold.|Ask about old-world flying possibilities.|Ask about reputation mount farming.|Ask which heroic dungeon is hardest.|Ask if emblems are too easy to get."
 
 # --------------------------------------------
 # EVENT CHATTER SYSTEM
@@ -589,7 +657,7 @@ OllamaChat.EnableGuildRandomAmbientChatter = 1
 # OllamaChat.GuildRandomChatterChance
 #     Description: Percent chance (0-100) for a bot to send a random guild chat message when eligible.
 #     Default:     10
-OllamaChat.GuildRandomChatterChance = 10
+OllamaChat.GuildRandomChatterChance = 85
 
 # OllamaChat.EnableGuildEventChatter
 #     Description: Enable guild-specific random chatter for bots in guilds with real players.

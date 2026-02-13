@@ -21,8 +21,16 @@ float      g_EventChatterRealPlayerDistance = 40.0f;
 // --------------------------------------------
 // Bot/Player Chatter Probability & Limits
 // --------------------------------------------
-uint32_t   g_PlayerReplyChance = 90;
-uint32_t   g_BotReplyChance    = 10;
+// Per-channel-type reply chances
+uint32_t   g_PlayerReplyChance_Say     = 90;
+uint32_t   g_BotReplyChance_Say        = 10;
+uint32_t   g_PlayerReplyChance_Channel = 50;
+uint32_t   g_BotReplyChance_Channel    = 5;
+uint32_t   g_PlayerReplyChance_Party   = 90;
+uint32_t   g_BotReplyChance_Party      = 10;
+uint32_t   g_PlayerReplyChance_Guild   = 70;
+uint32_t   g_BotReplyChance_Guild      = 5;
+
 uint32_t   g_MaxBotsToPick     = 2;
 uint32_t   g_RandomChatterBotCommentChance   = 5;
 uint32_t   g_RandomChatterMaxBotsPerPlayer   = 2;
@@ -83,6 +91,8 @@ uint32_t    g_ConversationHistorySaveInterval = 10;
 // Prompt Templates
 // --------------------------------------------
 std::string g_RandomChatterPromptTemplate;
+std::vector<std::string> g_RandomChatterPromptVariations;
+std::vector<std::string> g_RandomChatterQuestionVariations;
 std::string g_EventChatterPromptTemplate;
 std::string g_ChatPromptTemplate;
 std::string g_ChatExtraInfoTemplate;
@@ -255,9 +265,12 @@ int g_GuildEventTypeDungeonComplete_Chance = 0;
 uint32_t g_EventCooldownTime = 10;
 
 // --------------------------------------------
-// Party Restriction Settings
+// Channel Disable Settings
 // --------------------------------------------
-bool g_RestrictBotsToPartyMembers = false;
+bool g_DisableForCustomChannels = false;
+bool g_DisableForSayYell = false;
+bool g_DisableForGuild = false;
+bool g_DisableForParty = false;
 
 // --------------------------------------------
 // Typing Simulation Settings
@@ -360,8 +373,17 @@ void LoadOllamaChatConfig()
 {
     g_SayDistance                     = sConfigMgr->GetOption<float>("OllamaChat.SayDistance", 30.0f);
     g_YellDistance                    = sConfigMgr->GetOption<float>("OllamaChat.YellDistance", 100.0f);
-    g_PlayerReplyChance               = sConfigMgr->GetOption<uint32_t>("OllamaChat.PlayerReplyChance", 90);
-    g_BotReplyChance                  = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotReplyChance", 10);
+    
+    // Load per-channel-type reply chances
+    g_PlayerReplyChance_Say           = sConfigMgr->GetOption<uint32_t>("OllamaChat.PlayerReplyChance.Say", 90);
+    g_BotReplyChance_Say              = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotReplyChance.Say", 10);
+    g_PlayerReplyChance_Channel       = sConfigMgr->GetOption<uint32_t>("OllamaChat.PlayerReplyChance.Channel", 50);
+    g_BotReplyChance_Channel          = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotReplyChance.Channel", 5);
+    g_PlayerReplyChance_Party         = sConfigMgr->GetOption<uint32_t>("OllamaChat.PlayerReplyChance.Party", 90);
+    g_BotReplyChance_Party            = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotReplyChance.Party", 10);
+    g_PlayerReplyChance_Guild         = sConfigMgr->GetOption<uint32_t>("OllamaChat.PlayerReplyChance.Guild", 70);
+    g_BotReplyChance_Guild            = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotReplyChance.Guild", 5);
+    
     g_MaxBotsToPick                   = sConfigMgr->GetOption<uint32_t>("OllamaChat.MaxBotsToPick", 2);
     g_OllamaUrl                       = sConfigMgr->GetOption<std::string>("OllamaChat.Url", "http://localhost:11434/api/generate");
     g_OllamaModel                     = sConfigMgr->GetOption<std::string>("OllamaChat.Model", "llama3.2:1b");
@@ -403,6 +425,38 @@ void LoadOllamaChatConfig()
     g_EnableRPPersonalities           = sConfigMgr->GetOption<bool>("OllamaChat.EnableRPPersonalities", false);
 
     g_RandomChatterPromptTemplate     = sConfigMgr->GetOption<std::string>("OllamaChat.RandomChatterPromptTemplate", "");
+
+    // Load random chatter prompt variations
+    std::string variationsStr = sConfigMgr->GetOption<std::string>("OllamaChat.RandomChatterPromptVariations", "");
+    g_RandomChatterPromptVariations.clear();
+    if (!variationsStr.empty())
+    {
+        std::stringstream ss(variationsStr);
+        std::string variation;
+        while (std::getline(ss, variation, '|'))
+        {
+            if (!variation.empty())
+            {
+                g_RandomChatterPromptVariations.push_back(variation);
+            }
+        }
+    }
+
+    // Load random chatter question variations
+    std::string questionsStr = sConfigMgr->GetOption<std::string>("OllamaChat.RandomChatterQuestionVariations", "");
+    g_RandomChatterQuestionVariations.clear();
+    if (!questionsStr.empty())
+    {
+        std::stringstream ss(questionsStr);
+        std::string question;
+        while (std::getline(ss, question, '|'))
+        {
+            if (!question.empty())
+            {
+                g_RandomChatterQuestionVariations.push_back(question);
+            }
+        }
+    }
 
     g_EventChatterPromptTemplate     = sConfigMgr->GetOption<std::string>("OllamaChat.EventChatterPromptTemplate", "");
 
@@ -572,16 +626,23 @@ void LoadOllamaChatConfig()
     // Cooldown time for events
     g_EventCooldownTime = sConfigMgr->GetOption<uint32_t>("OllamaChat.EventCooldownTime", 10);
 
-    // Party restriction settings
-    g_RestrictBotsToPartyMembers = sConfigMgr->GetOption<bool>("OllamaChat.RestrictBotsToPartyMembers", false);
+    // Channel disable settings
+    g_DisableForCustomChannels = sConfigMgr->GetOption<bool>("OllamaChat.DisableForCustomChannels", false);
+    g_DisableForSayYell = sConfigMgr->GetOption<bool>("OllamaChat.DisableForSayYell", false);
+    g_DisableForGuild = sConfigMgr->GetOption<bool>("OllamaChat.DisableForGuild", false);
+    g_DisableForParty = sConfigMgr->GetOption<bool>("OllamaChat.DisableForParty", false);
 
     LOG_INFO("server.loading",
              "[Ollama Chat] Config loaded: Enabled = {}, SayDistance = {}, YellDistance = {}, "
-             "PlayerReplyChance = {}%, BotReplyChance = {}%, MaxBotsToPick = {}, "
+             "Reply Chances - Say: P{}%/B{}%, Channel: P{}%/B{}%, Party: P{}%/B{}%, Guild: P{}%/B{}%, MaxBotsToPick = {}, "
              "Url = {}, Model = {}, MaxConcurrentQueries = {}, EnableRandomChatter = {}, MinRandInt = {}, MaxRandInt = {}, RandomChatterRealPlayerDistance = {}, "
              "RandomChatterBotCommentChance = {}. MaxConcurrentQueries = {}. Extra blacklist commands: {}",
              g_Enable, g_SayDistance, g_YellDistance,
-             g_PlayerReplyChance, g_BotReplyChance, g_MaxBotsToPick,
+             g_PlayerReplyChance_Say, g_BotReplyChance_Say,
+             g_PlayerReplyChance_Channel, g_BotReplyChance_Channel,
+             g_PlayerReplyChance_Party, g_BotReplyChance_Party,
+             g_PlayerReplyChance_Guild, g_BotReplyChance_Guild,
+             g_MaxBotsToPick,
              g_OllamaUrl, g_OllamaModel, g_MaxConcurrentQueries,
              g_EnableRandomChatter, g_MinRandomInterval, g_MaxRandomInterval, g_RandomChatterRealPlayerDistance,
              g_RandomChatterBotCommentChance, g_MaxConcurrentQueries, extraBlacklist);

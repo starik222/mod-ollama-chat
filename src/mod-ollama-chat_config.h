@@ -21,8 +21,16 @@ extern float      g_EventChatterRealPlayerDistance;
 // --------------------------------------------
 // Bot/Player Chatter Probability & Limits
 // --------------------------------------------
-extern uint32_t   g_PlayerReplyChance;
-extern uint32_t   g_BotReplyChance;
+// Per-channel-type reply chances
+extern uint32_t   g_PlayerReplyChance_Say;
+extern uint32_t   g_BotReplyChance_Say;
+extern uint32_t   g_PlayerReplyChance_Channel;
+extern uint32_t   g_BotReplyChance_Channel;
+extern uint32_t   g_PlayerReplyChance_Party;
+extern uint32_t   g_BotReplyChance_Party;
+extern uint32_t   g_PlayerReplyChance_Guild;
+extern uint32_t   g_BotReplyChance_Guild;
+
 extern uint32_t   g_MaxBotsToPick;
 extern uint32_t   g_RandomChatterBotCommentChance;
 extern uint32_t   g_RandomChatterMaxBotsPerPlayer;
@@ -78,6 +86,8 @@ extern uint32_t    g_ConversationHistorySaveInterval;
 // Prompt Templates
 // --------------------------------------------
 extern std::string g_RandomChatterPromptTemplate;
+extern std::vector<std::string> g_RandomChatterPromptVariations;
+extern std::vector<std::string> g_RandomChatterQuestionVariations;
 extern std::string g_EventChatterPromptTemplate;
 extern std::string g_ChatPromptTemplate;
 extern std::string g_ChatExtraInfoTemplate;
@@ -254,9 +264,12 @@ extern std::string g_EventTypeUsedObject;         // "used object"
 extern uint32_t g_EventCooldownTime;
 
 // --------------------------------------------
-// Party Restriction Settings
+// Channel Disable Settings
 // --------------------------------------------
-extern bool g_RestrictBotsToPartyMembers;
+extern bool g_DisableForCustomChannels;
+extern bool g_DisableForSayYell;
+extern bool g_DisableForGuild;
+extern bool g_DisableForParty;
 
 // --------------------------------------------
 // Typing Simulation Settings
