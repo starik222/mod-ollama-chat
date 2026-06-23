@@ -41,6 +41,7 @@ extern uint32_t   g_EventChatterMaxBotsPerPlayer;
 // --------------------------------------------
 // Ollama LLM API Configuration
 // --------------------------------------------
+extern std::string g_OllamaApiProvider;
 extern std::string g_OllamaUrl;
 extern std::string g_OllamaModel;
 extern uint32_t    g_OllamaNumPredict;

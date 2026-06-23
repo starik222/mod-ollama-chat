@@ -41,6 +41,7 @@ uint32_t   g_EventChatterMaxBotsPerPlayer    = 2;
 // --------------------------------------------
 // Ollama LLM API Configuration
 // --------------------------------------------
+std::string g_OllamaApiProvider = "ollama";
 std::string g_OllamaUrl        = "http://localhost:11434/api/generate";
 std::string g_OllamaModel      = "llama3.2:1b";
 uint32_t    g_OllamaNumPredict = 40;
@@ -385,6 +386,7 @@ void LoadOllamaChatConfig()
     g_BotReplyChance_Guild            = sConfigMgr->GetOption<uint32_t>("OllamaChat.BotReplyChance.Guild", 5);
     
     g_MaxBotsToPick                   = sConfigMgr->GetOption<uint32_t>("OllamaChat.MaxBotsToPick", 2);
+    g_OllamaApiProvider               = sConfigMgr->GetOption<std::string>("OllamaChat.ApiProvider", "ollama");
     g_OllamaUrl                       = sConfigMgr->GetOption<std::string>("OllamaChat.Url", "http://localhost:11434/api/generate");
     g_OllamaModel                     = sConfigMgr->GetOption<std::string>("OllamaChat.Model", "llama3.2:1b");
     g_OllamaNumPredict                = sConfigMgr->GetOption<uint32_t>("OllamaChat.NumPredict", 40);
@@ -633,11 +635,11 @@ void LoadOllamaChatConfig()
     g_DisableForParty = sConfigMgr->GetOption<bool>("OllamaChat.DisableForParty", false);
 
     LOG_INFO("server.loading",
-             "[Ollama Chat] Config loaded: Enabled = {}, SayDistance = {}, YellDistance = {}, "
+             "[Ollama Chat] Config loaded: Enabled = {}, ApiProvider = {}, SayDistance = {}, YellDistance = {}, "
              "Reply Chances - Say: P{}%/B{}%, Channel: P{}%/B{}%, Party: P{}%/B{}%, Guild: P{}%/B{}%, MaxBotsToPick = {}, "
              "Url = {}, Model = {}, MaxConcurrentQueries = {}, EnableRandomChatter = {}, MinRandInt = {}, MaxRandInt = {}, RandomChatterRealPlayerDistance = {}, "
              "RandomChatterBotCommentChance = {}. MaxConcurrentQueries = {}. Extra blacklist commands: {}",
-             g_Enable, g_SayDistance, g_YellDistance,
+             g_Enable, g_OllamaApiProvider, g_SayDistance, g_YellDistance,
              g_PlayerReplyChance_Say, g_BotReplyChance_Say,
              g_PlayerReplyChance_Channel, g_BotReplyChance_Channel,
              g_PlayerReplyChance_Party, g_BotReplyChance_Party,

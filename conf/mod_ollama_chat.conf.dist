@@ -33,9 +33,20 @@ OllamaChat.DebugShowFullPrompt = 0
 # OLLAMA LLM CONNECTION AND INFERENCE
 # --------------------------------------------
 
+# OllamaChat.ApiProvider
+#     Description: The API backend provider to use for LLM inference.
+#                  "ollama"   - Ollama's native generation endpoint (/api/generate).
+#                  "llamacpp" - llama.cpp's native completion endpoint (/completion).
+#                  "openai"   - OpenAI-compatible chat completions endpoint (/v1/chat/completions).
+#                               Supported by llama.cpp, LM Studio, Ollama, and cloud hosts.
+#     Default:     "ollama"
+OllamaChat.ApiProvider = "ollama"
+
 # OllamaChat.Url
 #     Description: The URL used to query the Ollama API.
-#     Default:     http://localhost:11434/api/generate
+#     Default:     http://localhost:11434/api/generate (For Ollama)
+#                  http://localhost:8080/completion     (For llama.cpp native)
+#                  http://localhost:8080/v1/chat/completions (For OpenAI-compatible)
 OllamaChat.Url = http://localhost:11434/api/generate
 
 # OllamaChat.Model
