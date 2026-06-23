@@ -1,3 +1,4 @@
+#define CURL_STATICLIB
 #include "mod-ollama-chat_config.h"
 #include "mod-ollama-chat_sentiment.h"
 #include "mod-ollama-chat_rag.h"
